@@ -1,0 +1,6 @@
+.mypy_cache/
+.vscode/
+.DS_Store
+DataGeneration/__pycache__/
+Experiments/__pycache__/
+Algorithms/__pycache__/

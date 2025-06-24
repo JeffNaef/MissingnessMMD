@@ -1,0 +1,256 @@
+##Gaussian MCAR with data contamination
+---------------------------------------------
+  
+  
+  # R Setup for Using https://github.com/cullena20/RobustMeanEstimation/tree/main
+  # =======================================================
+
+# Step 1: Install and load required R packages
+# ---------------------------------------------
+library(drf)
+library(devtools)
+library(reticulate)
+
+
+# Step 2: Set up Python environment
+# ----------------------------------
+
+# Check if Python is available
+py_available()
+
+py_require(c("torch", "torchvision", "torchaudio"))
+py_require(c("numpy", "scipy", "matplotlib", "seaborn", "pandas", "scikit-learn"))
+
+
+
+# Step 5: Import Python modules and setup
+# ----------------------------------------
+
+# Import necessary Python modules
+np <- import("numpy")
+torch <- import("torch")
+sys <- import("sys")
+os <- import("os")
+matplotlib <- import("matplotlib")
+#eigenvalue_pruning<-import("eigenvalue_pruning")
+
+
+source_python('RobustMeanEstimation-main/Algorithms/eigenvalue_pruning.py')
+source_python('RobustMeanEstimation-main/Algorithms/que.py')
+source_python('RobustMeanEstimation-main/Algorithms/que_utils.py')
+
+############################################
+# =======================================================
+
+
+
+
+# Load required libraries
+library(MASS)  # for multivariate normal generation
+library(ggplot2)
+library(reshape2)
+library(mice)
+source("mmd_est.R")
+source("helpers.R")
+
+# Set parameters
+set.seed(123)  # for reproducibility
+n <- 500      # total number of samples
+d <- 10         # dimension (you can change this)
+eps <- 0.2 # contamination fraction (10% contaminated data)
+p1=0.2
+p2=1
+
+
+# Clean distribution parameters
+mu_clean <- rep(0, d)        # mean vector of zeros
+Sigma_clean <- diag(d)       # identity covariance matrix
+
+
+
+Xtest<-createdistMCAR(n=5000, d=d, eps=eps, contdist="dirac", c=10, p1=p1, p2=p2)
+
+##Fraction of missingness should be (6*p1/d)
+sum(is.na(Xtest))/(5000*d)
+
+#mmd_estown(Xtest, model = "multidim.Gaussian.loc", par2 = 1, control=list(method="SGD", burnin=50, nstep=100))
+##expected fraction:
+## p2 / (1 - p1 + p2) + (p1 * (1 - p1)) / (d * (1 - p1 + p2)) * (1 - (p1 - p2)^d) / (1 - (p1 - p2))
+
+
+
+contaminationlist<-c("rnorm", "rnorm", "rnorm", "dirac","dirac")
+parameters<-c(0.2,1,10,1,10)
+methodsp<-c("MMD", "mean", "median", "normimp", "meanimp")
+methodsnp<-c("evpruning", "que")
+methods<-c(methodsp,methodsnp)
+
+
+# Load required packages
+library(foreach)
+library(doParallel)
+
+# Setup parallel backend for Windows
+n_cores <- detectCores() - 1  # Use all cores except 1
+cl <- makeCluster(n_cores)
+registerDoParallel(cl)
+
+
+clusterExport(cl, c("contaminationlist", "parameters", "methods",
+                    "n", "d", "eps", "p1", "p2",  # Add your actual variable names here
+                    "createdistMCAR", "mmd_estown"))   # Add your function names here
+
+
+clusterEvalQ(cl, {
+  # library(your_package_name)  # Add any packages your functions need
+  library(mice)
+  library(reticulate)
+})
+
+B<-50
+
+#for (b in 1:B){
+resultsp <- foreach(b = 1:B, .combine ='rbind') %dopar% {
+  set.seed(b)
+  
+  cat(b)
+  
+  methodlist<-list()
+  
+  for (method in methodsp){
+    methodlist[[method]] <- matrix(NA, nrow=1, ncol=length(contaminationlist))
+    colnames(methodlist[[method]]) <- paste0(method, ".", contaminationlist,"_", parameters)
+  }
+  
+  
+  for (l in 1:length(contaminationlist)){
+    
+    contdist <- contaminationlist[l]
+    
+    cat(contdist)
+    
+    if (contdist=="rnorm"){
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l], p1=p1, p2=p2)
+    } else if (contdist=="dirac"){
+      
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l], p1=p1, p2=p2) 
+      
+    }
+    
+    
+    for (method in methodsp){
+      
+      estimate<-get_estimate(X, method=method)
+      methodlist[[method]][1,l]<-sqrt(sum(c(estimate)^2)) 
+      
+    }
+    
+  }
+  
+  #res<-data.frame(cbind(MSEours, MSEmean, MSEmedian,MSEnormimp, MSEmeanimp ))
+  
+  res<-data.frame(do.call(cbind,methodlist))
+  
+  return(res)
+  #return(list(MSEours=MSEours, MSEmean=MSEmean  ))
+  
+  
+}
+
+
+
+
+resultsnp <- t(sapply(1:B, function(b){
+  set.seed(b)
+  
+  cat(b)
+  
+  methodlist<-list()
+  
+  for (method in methodsnp){
+    methodlist[[method]] <- matrix(NA, nrow=1, ncol=length(contaminationlist))
+    colnames(methodlist[[method]]) <- paste0(method, ".", contaminationlist,"_", parameters)
+  }
+  
+  
+  for (l in 1:length(contaminationlist)){
+    
+    contdist <- contaminationlist[l]
+    
+    cat(contdist)
+    
+    if (contdist=="rnorm"){
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l], p1=p1, p2=p2)
+    } else if (contdist=="dirac"){
+      
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l], p1=p1, p2=p2) 
+      
+    }
+    
+    
+    for (method in methodsnp){
+      
+      estimate<-get_estimate(X, method=method)
+      methodlist[[method]][1,l]<-sqrt(sum(c(estimate)^2)) 
+      
+    }
+    
+  }
+  
+  #res<-data.frame(cbind(MSEours, MSEmean, MSEmedian,MSEnormimp, MSEmeanimp ))
+  
+  res<-data.frame(do.call(cbind,methodlist))
+  
+  return(res)
+  #return(list(MSEours=MSEours, MSEmean=MSEmean  ))
+  
+  
+}))
+
+
+###Need to concatenate resultsp and resultsnp!!!
+resultsnp<-apply(resultsnp,2, unlist)
+results<-cbind(resultsp, resultsnp)
+####
+
+save(results, file="MCARResults.R" )
+
+resultsmean<-colMeans(as.matrix(results))
+
+
+methodlist<-list()
+
+for (method in methods){
+  methodlist[[method]] <- resultsmean[grepl(paste0("^", method, "\\."), names(resultsmean))]
+}
+
+
+results_matrix<-data.frame(do.call(rbind,methodlist))
+
+# Convert to LaTeX table using xtable
+library(xtable)
+latex_table <- xtable(results_matrix, 
+                      caption = "Comparison of MMD and MLE Results",
+                      label = "tab:results")
+
+# Print the LaTeX code
+print(latex_table, 
+      type = "latex", 
+      include.rownames = TRUE,
+      caption.placement = "top")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
