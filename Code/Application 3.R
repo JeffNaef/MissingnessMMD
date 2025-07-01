@@ -1,10 +1,10 @@
 ##Gaussian MCAR with double contamination
 ---------------------------------------------
-
-
-
-# R Setup for Using https://github.com/cullena20/RobustMeanEstimation/tree/main
-# =======================================================
+  
+  
+  
+  # R Setup for Using https://github.com/cullena20/RobustMeanEstimation/tree/main
+  # =======================================================
 
 # Step 1: Install and load required R packages
 # ---------------------------------------------
@@ -60,9 +60,7 @@ source("helpers.R")
 set.seed(123)  # for reproducibility
 n <- 500      # total number of samples
 d <- 10         # dimension (you can change this)
-eps <- 0.2 # contamination fraction (10% contaminated data)
-p1=0.2
-p2=1
+eps <- 0.3 # contamination fraction (10% contaminated data)
 
 
 # Clean distribution parameters
@@ -73,9 +71,9 @@ Sigma_clean <- diag(d)       # identity covariance matrix
 
 
 
-Xtest<-createdistMNARMCAR(n=5000, d=d, eps=eps, p1=p1, p2=p2, contdist="dirac", c=10)
+Xtest<-createdistMNARMCAR(n=5000, d=d, eps=eps, contdist="dirac", c=10)
 
-dim(Xtest)
+sum(complete.cases(Xtest))/nrow(Xtest)
 
 #mmd_estown(Xtest, model = "multidim.Gaussian.loc", par2 = 1, control=list(method="SGD", burnin=50, nstep=100))
 ##expected fraction:
@@ -84,8 +82,8 @@ dim(Xtest)
 
 
 contaminationlist<-c("rnorm", "rnorm", "rnorm", "dirac","dirac")
-parameters<-c(0.2,1,10,1,10)
-methodsp<-c("MMD", "mean", "median", "normimp", "meanimp")
+parameters<-c(0,1,10,1,10)
+methodsp<-c("MMD", "mean", "median")
 methodsnp<-c("evpruning", "que")
 methods<-c(methodsp,methodsnp)
 
@@ -100,7 +98,7 @@ registerDoParallel(cl)
 
 
 clusterExport(cl, c("contaminationlist", "parameters", 
-                    "n", "d", "eps", "p1", "p2",  # Add your actual variable names here
+                    "n", "d", "eps",  # Add your actual variable names here
                     "createdistMNARMCAR", "mmd_estown"))   # Add your function names here
 
 
@@ -132,10 +130,10 @@ resultsp <- foreach(b = 1:B, .combine ='rbind') %dopar% {
     cat(contdist)
     
     if (contdist=="rnorm"){
-      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l], p1=p1, p2=p2)
+      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l])
     } else if (contdist=="dirac"){
       
-      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l], p1=p1, p2=p2) 
+      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l]) 
       
     }
     
@@ -177,10 +175,10 @@ resultsnp <- t(sapply(1:B, function(b){
     cat(contdist)
     
     if (contdist=="rnorm"){
-      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l], p1=p1, p2=p2)
+      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l])
     } else if (contdist=="dirac"){
       
-      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l], p1=p1, p2=p2) 
+      X<-createdistMNARMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l]) 
       
     }
     
@@ -211,23 +209,45 @@ results<-cbind(resultsp, resultsnp)
 ####
 
 
-save(results, file="MNAR_contaminationResults.R" )
+save(results, file=paste0("MNAR_contaminationResults_", "eps_", eps,".R" ) )
+#save(results, file="MNAR_contaminationResults.R" )
 
 resultsmean<-colMeans(results)
-
+resultssd<-apply(results,2, sd)
 
 methodlist<-list()
-
+methodlistsd<-list()
 for (method in methods){
-  methodlist[[method]] <- resultsmean[grepl(paste0("^", method, "\\."), names(resultsmean))]
+  methodlist[[method]] <- rbind(resultsmean[grepl(paste0("^", method, "\\."), names(resultsmean))], resultssd[grepl(paste0("^", method, "\\."), names(resultssd))])
+  #methodlistsd[[method]] <- resultssd[grepl(paste0("^", method, "\\."), names(resultssd))]
 }
 
 
-results_matrix<-data.frame(do.call(rbind,methodlist))
+
+
+results_matrix <- round(data.frame(do.call(rbind, methodlist)),2)
+
+# Create a copy for formatting
+formatted_matrix <- results_matrix
+
+# Find minimum value in each column and bold it
+for(j in 1:ncol(results_matrix)) {
+  # Add brackets to SD
+  formatted_matrix[seq(from=2,to=(nrow(results_matrix)), by=2  ), j] <- paste0("(", results_matrix[seq(from=2,to=(nrow(results_matrix)), by=2  ), j], ")")
+  min_idx <- which.min(results_matrix[seq(from=1,to=(nrow(results_matrix)-1), by=2  ), j])
+  ##correction because we only look at odd numbers:
+  min_idx <- min_idx + (min_idx-1) 
+  formatted_matrix[min_idx, j] <- paste0("\\textbf{", results_matrix[min_idx, j], "}")
+  formatted_matrix[min_idx+1, j] <- paste0("\\textbf{(", results_matrix[min_idx+1, j], ")}")
+}
+
+rownames(formatted_matrix)<-NULL
+rownames(formatted_matrix)[seq(from=1,to=(nrow(results_matrix)-1), by=2  )] <-methods
+
 
 # Convert to LaTeX table using xtable
 library(xtable)
-latex_table <- xtable(results_matrix, 
+latex_table <- xtable(formatted_matrix, 
                       caption = "Comparison of MMD and MLE Results",
                       label = "tab:results")
 
@@ -235,23 +255,5 @@ latex_table <- xtable(results_matrix,
 print(latex_table, 
       type = "latex", 
       include.rownames = TRUE,
-      caption.placement = "top")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+      caption.placement = "top",
+      sanitize.text.function = function(x) x)  # Don't escape LaTeX commands

@@ -1,5 +1,6 @@
-##Gaussian MCAR with data contamination
+##Gaussian MCAR with double contamination
 ---------------------------------------------
+  
   
   
   # R Setup for Using https://github.com/cullena20/RobustMeanEstimation/tree/main
@@ -10,6 +11,9 @@
 library(drf)
 library(devtools)
 library(reticulate)
+
+
+
 
 
 # Step 2: Set up Python environment
@@ -49,7 +53,6 @@ source_python('RobustMeanEstimation-main/Algorithms/que_utils.py')
 library(MASS)  # for multivariate normal generation
 library(ggplot2)
 library(reshape2)
-library(mice)
 source("mmd_est.R")
 source("helpers.R")
 
@@ -58,8 +61,6 @@ set.seed(123)  # for reproducibility
 n <- 500      # total number of samples
 d <- 10         # dimension (you can change this)
 eps <- 0.2 # contamination fraction (10% contaminated data)
-p1=0.2
-p2=1
 
 
 # Clean distribution parameters
@@ -68,10 +69,11 @@ Sigma_clean <- diag(d)       # identity covariance matrix
 
 
 
-Xtest<-createdistMCAR(n=5000, d=d, eps=eps, contdist="dirac", c=10, p1=p1, p2=p2)
 
-##Fraction of missingness should be (6*p1/d)
-sum(is.na(Xtest))/(5000*d)
+
+Xtest<-createdistMCAR(n=5000, d=d, eps=eps, contdist="dirac", c=10)
+
+sum(complete.cases(Xtest))/nrow(Xtest)
 
 #mmd_estown(Xtest, model = "multidim.Gaussian.loc", par2 = 1, control=list(method="SGD", burnin=50, nstep=100))
 ##expected fraction:
@@ -80,11 +82,10 @@ sum(is.na(Xtest))/(5000*d)
 
 
 contaminationlist<-c("rnorm", "rnorm", "rnorm", "dirac","dirac")
-parameters<-c(0.2,1,10,1,10)
-methodsp<-c("MMD", "mean", "median", "normimp", "meanimp")
+parameters<-c(0,1,10,1,10)
+methodsp<-c("MMD", "mean", "median")
 methodsnp<-c("evpruning", "que")
 methods<-c(methodsp,methodsnp)
-
 
 # Load required packages
 library(foreach)
@@ -96,15 +97,14 @@ cl <- makeCluster(n_cores)
 registerDoParallel(cl)
 
 
-clusterExport(cl, c("contaminationlist", "parameters", "methods",
-                    "n", "d", "eps", "p1", "p2",  # Add your actual variable names here
-                    "createdistMCAR", "mmd_estown"))   # Add your function names here
+clusterExport(cl, c("contaminationlist", "parameters", 
+                    "n", "d", "eps",  # Add your actual variable names here
+                    "createdistMNARMCAR", "mmd_estown"))   # Add your function names here
 
 
 clusterEvalQ(cl, {
   # library(your_package_name)  # Add any packages your functions need
   library(mice)
-  library(reticulate)
 })
 
 B<-50
@@ -130,13 +130,12 @@ resultsp <- foreach(b = 1:B, .combine ='rbind') %dopar% {
     cat(contdist)
     
     if (contdist=="rnorm"){
-      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l], p1=p1, p2=p2)
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l])
     } else if (contdist=="dirac"){
       
-      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l], p1=p1, p2=p2) 
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l]) 
       
     }
-    
     
     for (method in methodsp){
       
@@ -144,10 +143,7 @@ resultsp <- foreach(b = 1:B, .combine ='rbind') %dopar% {
       methodlist[[method]][1,l]<-sqrt(sum(c(estimate)^2)) 
       
     }
-    
   }
-  
-  #res<-data.frame(cbind(MSEours, MSEmean, MSEmedian,MSEnormimp, MSEmeanimp ))
   
   res<-data.frame(do.call(cbind,methodlist))
   
@@ -156,7 +152,6 @@ resultsp <- foreach(b = 1:B, .combine ='rbind') %dopar% {
   
   
 }
-
 
 
 
@@ -180,10 +175,10 @@ resultsnp <- t(sapply(1:B, function(b){
     cat(contdist)
     
     if (contdist=="rnorm"){
-      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l], p1=p1, p2=p2)
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, mu=parameters[l])
     } else if (contdist=="dirac"){
       
-      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l], p1=p1, p2=p2) 
+      X<-createdistMCAR(n=n, d=d, eps=eps, contdist=contdist, c=parameters[l]) 
       
     }
     
@@ -213,23 +208,45 @@ resultsnp<-apply(resultsnp,2, unlist)
 results<-cbind(resultsp, resultsnp)
 ####
 
-save(results, file="MCARResults.R" )
 
-resultsmean<-colMeans(as.matrix(results))
+save(results, file=paste0("MCAR_Results_", "eps_", eps,".R" ) )
 
+resultsmean<-colMeans(results)
+resultssd<-apply(results,2, sd)
 
 methodlist<-list()
-
+methodlistsd<-list()
 for (method in methods){
-  methodlist[[method]] <- resultsmean[grepl(paste0("^", method, "\\."), names(resultsmean))]
+  methodlist[[method]] <- rbind(resultsmean[grepl(paste0("^", method, "\\."), names(resultsmean))], resultssd[grepl(paste0("^", method, "\\."), names(resultssd))])
+  #methodlistsd[[method]] <- resultssd[grepl(paste0("^", method, "\\."), names(resultssd))]
 }
 
 
-results_matrix<-data.frame(do.call(rbind,methodlist))
+
+
+results_matrix <- round(data.frame(do.call(rbind, methodlist)),2)
+
+# Create a copy for formatting
+formatted_matrix <- results_matrix
+
+# Find minimum value in each column and bold it
+for(j in 1:ncol(results_matrix)) {
+  # Add brackets to SD
+  formatted_matrix[seq(from=2,to=(nrow(results_matrix)), by=2  ), j] <- paste0("(", results_matrix[seq(from=2,to=(nrow(results_matrix)), by=2  ), j], ")")
+  min_idx <- which.min(results_matrix[seq(from=1,to=(nrow(results_matrix)-1), by=2  ), j])
+  ##correction because we only look at odd numbers:
+  min_idx <- min_idx + (min_idx-1) 
+  formatted_matrix[min_idx, j] <- paste0("\\textbf{", results_matrix[min_idx, j], "}")
+  formatted_matrix[min_idx+1, j] <- paste0("\\textbf{(", results_matrix[min_idx+1, j], ")}")
+}
+
+rownames(formatted_matrix)<-NULL
+rownames(formatted_matrix)[seq(from=1,to=(nrow(results_matrix)-1), by=2  )] <-methods
+
 
 # Convert to LaTeX table using xtable
 library(xtable)
-latex_table <- xtable(results_matrix, 
+latex_table <- xtable(formatted_matrix, 
                       caption = "Comparison of MMD and MLE Results",
                       label = "tab:results")
 
@@ -237,20 +254,5 @@ latex_table <- xtable(results_matrix,
 print(latex_table, 
       type = "latex", 
       include.rownames = TRUE,
-      caption.placement = "top")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+      caption.placement = "top",
+      sanitize.text.function = function(x) x)  # Don't escape LaTeX commands

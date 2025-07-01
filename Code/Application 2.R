@@ -213,11 +213,36 @@ for (method in methods){
 }
 
 
-results_matrix<-data.frame(do.call(rbind,methodlist))
+# results_matrix<-data.frame(do.call(rbind,methodlist))
+# 
+# # Convert to LaTeX table using xtable
+# library(xtable)
+# latex_table <- xtable(results_matrix, 
+#                       caption = "Comparison of MMD and MLE Results",
+#                       label = "tab:results")
+# 
+# # Print the LaTeX code
+# print(latex_table, 
+#       type = "latex", 
+#       include.rownames = TRUE,
+#       caption.placement = "top")
+
+
+
+results_matrix <- round(data.frame(do.call(rbind, methodlist)),2)
+
+# Create a copy for formatting
+formatted_matrix <- results_matrix
+
+# Find minimum value in each column and bold it
+for(j in 1:ncol(results_matrix)) {
+  min_idx <- which.min(results_matrix[, j])
+  formatted_matrix[min_idx, j] <- paste0("\\textbf{", results_matrix[min_idx, j], "}")
+}
 
 # Convert to LaTeX table using xtable
 library(xtable)
-latex_table <- xtable(results_matrix, 
+latex_table <- xtable(formatted_matrix, 
                       caption = "Comparison of MMD and MLE Results",
                       label = "tab:results")
 
@@ -225,4 +250,5 @@ latex_table <- xtable(results_matrix,
 print(latex_table, 
       type = "latex", 
       include.rownames = TRUE,
-      caption.placement = "top")
+      caption.placement = "top",
+      sanitize.text.function = function(x) x)  # Don't escape LaTeX commands
