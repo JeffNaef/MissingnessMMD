@@ -87,7 +87,16 @@ mmd_estown<-function (x, model, par1 = NULL, par2 = NULL, kernel = "Gaussian",
               return(invisible(out))
             }
             if (bdwth == "median") {
-              bdwth = median(c(dist(x, method = "euclidean")))
+              ##Weirdly weighting the missing values:
+              ## Original code:
+              #bdwth = median(c(dist(x, method = "euclidean")))
+              ### What we do in the algorithm:
+              u = as.matrix(dist(x, method = "euclidean"))
+              weighting<-sqrt(as.matrix(dist(is.na(rbind(x))*1,method = "manhattan"))/ncol(x))
+              weighting[weighting==0] <- 1
+              u<-(u*weighting)
+              bdwth=median(c(u))
+              ######
               if (bdwth == 0) 
                 bdwth = 1
             }

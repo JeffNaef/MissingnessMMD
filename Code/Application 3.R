@@ -60,7 +60,7 @@ source("helpers.R")
 set.seed(123)  # for reproducibility
 n <- 500      # total number of samples
 d <- 10         # dimension (you can change this)
-eps <- 0.3 # contamination fraction (10% contaminated data)
+eps <- 0.2 # contamination fraction (10% contaminated data)
 
 
 # Clean distribution parameters
